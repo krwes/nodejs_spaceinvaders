@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Space Invaders</title>
+		<style>
+			#container {
+				width: 800px;
+				margin: 0 auto;
+			}
+			#terminal {
+				width: 800px;
+				overflow-y: hidden;
+				height: 60px;
+				border: 1px solid black;
+			}
+			//#webcam,
+			#feed {
+				display: none;
+			}
+			#geluid,
+			#geluid3d,
+			#display {
+				border: 1px solid black;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="container">
+			<div style="display:none;">
+				<h2>Video</h2>
+				<h2>Display links</h2>
+				<canvas id="display-l"></canvas><br/>
+				<h2>Feed</h2>
+				<canvas id="feed"></canvas><br/>
+				<h2>Display</h2>
+				<canvas id="photo"></canvas>
+				<video id="webcam"></video><br/>
+				<canvas id="display"></canvas><br/>
+			</div>
+			<input type="text" id="name" onwebkitspeechchange="jQuery(this).change();" x-webkit-speech />
+			<ul id="rooms"></ul>
+			<a href="#" id="leave-room">Leave room</a>
+			<canvas id="arena" width="800" height="600"></canvas>
+			<input type="text" id="input"/>
+			<div id="terminal"></div>
+		</div>
+		<script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+		<script src="/crossbrowser.js"></script>
+		<script src="/kbh.js"></script>
+		<script src="/audiohandler.js"></script>
+		<script src="/camhandler.js"></script>
+		<script src="/spaceinvaders.js"></script>
+		<script>
+		(function($) {
+			var $container	= $("#container");
+			var $terminal	= $('#terminal');
+			var $arena		= $("#arena");
+			var connect = function() {
+				try {
+					var socket			= new WebSocket("ws://game.swc.nl:8080/socket.io/");
+					var kbh				= new KeyboardHandler(socket);
+					var audiohandler	= new AudioHandler();
+					var camhandler		= new CamHandler();
+					var Commands		= {};
+					var $rooms_ul = $('#rooms');
+					var arena = new SpaceInvadersArena({
+						canvas:		$arena[0],
+						$ul_room:	$rooms_ul
+					});
+					var $doc = $(document);
+					$doc.keydown(function(ev) {	kbh.onKeyDown(ev);	});
+					$doc.keyup(function(ev) {	kbh.onKeyUp(ev);	});
+					$doc.on("go-left", function() {kbh.onKeyPressed(kbh.keys.left);});
+					$doc.on("go-right", function() {kbh.onKeyPressed(kbh.keys.right);});
+					$doc.on("fire", function() {kbh.onKeyPressed(kbh.keys.spacebar);});
+
+					var $datainput	= $("#input");
+					var $nameinput	= $("#name");
+					var gamer_id	= new Date().getTime();
+					$container.on("click", ".room-select", function(ev) {
+						ev.preventDefault();
+						socket.send(JSON.stringify({
+							cmd			: Commands.joinRoom,
+							room_id		: $(this).data("id"),
+							gamer_id	: gamer_id,
+							gamer_name	: $nameinput.val(),
+							gamer_color	: '#' + ('111111' + Math.floor(Math.random() * 0xFFFFFF).toString(16)).substr(-6)
+						}));
+					});
+					$("#leave-room").click(function(ev) {
+						ev.preventDefault();
+						socket.send(JSON.stringify({
+							cmd		: Commands.leaveRoom
+						}));
+					});
+					$nameinput.change(function() {
+						socket.send(JSON.stringify({
+							cmd		: Commands.setBlasterName,
+							name	: this.value
+						}));
+					});
+					$datainput.change(function() {
+						socket.send(JSON.stringify({
+							cmd	: Commands.message,
+							name: "Gamer 1",
+							msg	: this.value
+						}));
+						this.value = "";
+					});
+					socket.onclose = function(ev) {
+						$arena.hide();
+						$terminal.html('<p>De Nodejs game server is niet (meer) bereikbaar.</p>');
+						console.log('Socket closing / closed');
+					};
+					socket.onopen = function(ev) {
+						$arena.show();
+						arena.setupCanvas();
+						audiohandler.init();
+						camhandler.init();
+					};
+					socket.onmessage = function(ev) {
+						var data = JSON.parse(ev.data);
+						if (data.cmd) {
+							switch(data.cmd) {
+								case 999:
+									//registeryourself
+									Commands = data.commands;
+									kbh.setCommands(Commands);
+									socket.send(JSON.stringify({
+										cmd: Commands.listRooms
+									}));
+									break;
+								case Commands.availableRooms:	
+									$rooms_ul.empty();
+									arena.updateRooms(data.rooms); 
+									break;
+								case Commands.updateLevel:		arena.setLevel(data.level); break;
+								case Commands.setObjects:
+									arena.setInvaders(data.invaders);
+									arena.setBlasters(data.blasters);
+									arena.setBullets(data.bullets);
+									arena.redraw();
+									break;
+								case Commands.addMessage:		$terminal.html($terminal.html() + data.msg+"<br/>"); break;
+							}
+						}
+					};
+				} catch(exception) {
+					$arena.hide();
+					$terminal.html('<p>De Nodejs game server staat uit.</p>');
+				}
+			};
+			connect();
+		}(jQuery));
+		</script>
+	</body>
+</html>
